@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Management</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        #output {
+            margin-top: 20px;
+        }
+
+        .result {
+            margin: 10px 0;
+        }
+
+        #token-time {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Token Management</h1>
+    <button onclick="login()">ล็อกอิน</button>
+    <div id="output"></div>
+    <div id="token-time"></div>
+
+    <script>
+        let accessToken = "";
+        let refreshToken = "";
+        let accessTokenExpirationTime = 0; // เวลาหมดอายุของ Access Token
+
+        function displayMessage(message) {
+            const outputDiv = document.getElementById('output');
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('result');
+            messageDiv.innerText = message;
+            outputDiv.appendChild(messageDiv);
+        }
+
+        function startTokenCountdown() {
+            const countdownInterval = setInterval(() => {
+                const currentTime = Date.now() / 1000; // เวลาปัจจุบันในวินาที
+                const remainingTime = accessTokenExpirationTime - currentTime;
+
+                if (remainingTime > 0) {
+                    document.getElementById('token-time').innerText = `เวลาที่เหลือของ Access Token: ${Math.ceil(remainingTime)} วินาที`;
+                } else {
+                    clearInterval(countdownInterval);
+                    document.getElementById('token-time').innerText = "Access Token หมดอายุ!";
+                    refreshAccessToken(); // เรียกใช้งาน Refresh Token เมื่อ Access Token หมดอายุ
+                }
+            }, 1000); // อัปเดตทุก ๆ 1 วินาที
+        }
+
+        async function login() {
+            const username = "user"; // หรือใช้ document.getElementById('username').value
+            const password = "pass"; // หรือใช้ document.getElementById('password').value
+
+            const startTime = performance.now(); // เริ่มจับเวลา
+
+            const response = await fetch('http://localhost:7089/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                accessToken = data.access_token;
+                refreshToken = data.refresh_token;
+
+                // ตั้งค่าเวลาหมดอายุของ Access Token
+                accessTokenExpirationTime = Math.floor(Date.now() / 1000) + 15; // 15 วินาที
+
+                const endTime = performance.now(); // จับเวลาหลังจากล็อกอินเสร็จ
+                const loginTime = endTime - startTime;
+                displayMessage("ล็อกอินสำเร็จ!");
+                displayMessage("Access Token: " + accessToken);
+                displayMessage("Refresh Token: " + refreshToken);
+                displayMessage(`เวลาในการล็อกอิน: ${loginTime.toFixed(2)} ms`);
+
+                startTokenCountdown(); // เริ่มจับเวลาของ Access Token
+                await accessResource();
+            } else {
+                displayMessage("ล็อกอินล้มเหลว");
+            }
+        }
+
+        async function accessResource() {
+            const startTime = performance.now(); // เริ่มจับเวลา
+
+            const resourceResponse = await fetch('http://localhost:7089/auth/resource', {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${accessToken}` }
+            });
+
+            if (resourceResponse.ok) {
+                const data = await resourceResponse.json();
+                const endTime = performance.now(); // จับเวลาหลังจากเข้าถึง Resource เสร็จ
+                const resourceAccessTime = endTime - startTime;
+                displayMessage("เข้าถึง Resource สำเร็จ: " + JSON.stringify(data));
+                displayMessage(`เวลาในการเข้าถึง Resource: ${resourceAccessTime.toFixed(2)} ms`);
+            } else if (resourceResponse.status === 401) {
+                displayMessage("Access Token หมดอายุ! กำลังใช้ Refresh Token...");
+                refreshAccessToken();
+            } else {
+                displayMessage("ไม่สามารถเข้าถึง Resource");
+            }
+        }
+
+        let refreshAttemptCount = 0; // จำนวนครั้งที่พยายามรีเฟรชโทเค็น
+
+        async function refreshAccessToken() {
+            if (refreshAttemptCount >= 1) {
+                displayMessage("ไม่สามารถรีเฟรชโทเค็นได้อีกต่อไป"); // หยุดการรีเฟรชเมื่อถึงจำนวนสูงสุด
+                return;
+            }
+
+            refreshAttemptCount++; // เพิ่มจำนวนครั้งที่พยายามรีเฟรช
+
+            const startTime = performance.now(); // เริ่มจับเวลา
+
+            const refreshResponse = await fetch('http://localhost:7089/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken })
+            });
+
+            if (refreshResponse.ok) {
+                const data = await refreshResponse.json();
+                accessToken = data.access_token;
+                refreshToken = data.refresh_token;
+
+                // ตั้งค่าเวลาหมดอายุของ Access Token ใหม่
+                accessTokenExpirationTime = Math.floor(Date.now() / 1000) + 15; // 15 วินาที
+
+                const endTime = performance.now(); // จับเวลาหลังจากรีเฟรชโทเค็นเสร็จ
+                const refreshTime = endTime - startTime;
+                displayMessage("รีเฟรชโทเค็นสำเร็จ!");
+                displayMessage("Access Token ใหม่: " + accessToken);
+                displayMessage("Refresh Token ใหม่: " + refreshToken);
+                displayMessage(`เวลาในการรีเฟรชโทเค็น: ${refreshTime.toFixed(2)} ms`);
+
+                startTokenCountdown(); // เริ่มจับเวลาของ Access Token ใหม่
+                await accessResource();
+            } else {
+                displayMessage("ไม่สามารถรีเฟรชโทเค็นได้");
+            }
+        }
+
+    </script>
+</body>
+
+</html>
